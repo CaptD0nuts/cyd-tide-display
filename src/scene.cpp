@@ -16,10 +16,9 @@
 #define SAND_SLOPE 0.62f
 #define POLE_X     22
 
-// Rough sunrise/sunset (local hours) for the sky and sun; mid-October on the
-// Gulf coast. Cosmetic only.
-#define SUNRISE 6.8f
-#define SUNSET  18.3f
+// Fallback sunrise/sunset (local hours) until the station position is known.
+#define DEFAULT_SUNRISE 6.8f
+#define DEFAULT_SUNSET  18.3f
 
 static TFT_eSPI *s_tft;
 static TFT_eSprite *s_scene, *s_chart;
@@ -34,6 +33,53 @@ static Rgb mix(Rgb a, Rgb b, float u) {
   return {a.r + (b.r - a.r) * u, a.g + (b.g - a.g) * u, a.b + (b.b - a.b) * u};
 }
 
+static float s_lat = NAN, s_lon = NAN;
+
+void sceneSetLocation(float lat, float lon) {
+  s_lat = lat;
+  s_lon = lon;
+}
+
+// Sunrise and sunset (local hours) on the local day containing t, from the
+// standard sunrise equation; within a couple of minutes at mid latitudes.
+// Cached per day since the time-lapse asks every frame.
+static void sunTimes(double t, float &rise, float &set) {
+  static int cachedDay = -1;
+  static float cRise, cSet;
+  rise = DEFAULT_SUNRISE;
+  set = DEFAULT_SUNSET;
+  if (isnan(s_lat)) return;
+  time_t tt = (time_t)t;
+  struct tm lt;
+  localtime_r(&tt, &lt);
+  int day = lt.tm_year * 400 + lt.tm_yday;
+  if (day != cachedDay) {
+    lt.tm_hour = 12;
+    lt.tm_min = lt.tm_sec = 0;
+    lt.tm_isdst = -1;
+    time_t noon = mktime(&lt);
+    double jd = noon / 86400.0 + 2440587.5;
+    double j = round(jd - 2451545.0 + s_lon / 360.0) - s_lon / 360.0;
+    double m = fmod(357.5291 + 0.98560028 * j, 360.0) * DEG_TO_RAD;
+    double c = 1.9148 * sin(m) + 0.02 * sin(2 * m) + 0.0003 * sin(3 * m);
+    double l = fmod(m * RAD_TO_DEG + c + 180 + 102.9372, 360.0) * DEG_TO_RAD;
+    double transit = 2451545.0 + j + 0.0053 * sin(m) - 0.0069 * sin(2 * l);
+    double sinDec = sin(l) * sin(23.4397 * DEG_TO_RAD);
+    double cosDec = cos(asin(sinDec));
+    double phi = s_lat * DEG_TO_RAD;
+    double cosW = (sin(-0.833 * DEG_TO_RAD) - sin(phi) * sinDec) / (cos(phi) * cosDec);
+    double w = acos(constrain(cosW, -1.0, 1.0)) * RAD_TO_DEG;
+    // Julian dates to hours after local midnight.
+    double midnight = noon - 12 * 3600.0;
+    cRise = ((transit - w / 360.0 - 2440587.5) * 86400.0 - midnight) / 3600.0;
+    cSet = ((transit + w / 360.0 - 2440587.5) * 86400.0 - midnight) / 3600.0;
+    cachedDay = day;
+    Serial.printf("sun: rise %.2f set %.2f (local hours)\n", cRise, cSet);
+  }
+  rise = cRise;
+  set = cSet;
+}
+
 static float localHour(double t) {
   time_t tt = (time_t)t;
   struct tm lt;
@@ -42,15 +88,15 @@ static float localHour(double t) {
 }
 
 // Sky color through the day plus a 0..1 daylight factor for dimming the scene.
-static Rgb skyColor(float h, float &light) {
-  static const struct { float h; Rgb c; float light; } keys[] = {
+static Rgb skyColor(float h, float rise, float set, float &light) {
+  const struct { float h; Rgb c; float light; } keys[] = {
       {0, {8, 10, 35}, 0.35f},
-      {SUNRISE - 0.7f, {8, 10, 35}, 0.35f},
-      {SUNRISE, {235, 125, 70}, 0.7f},
-      {SUNRISE + 0.8f, {90, 165, 235}, 1.0f},
-      {SUNSET - 0.6f, {90, 165, 235}, 1.0f},
-      {SUNSET, {240, 110, 60}, 0.7f},
-      {SUNSET + 0.8f, {8, 10, 35}, 0.35f},
+      {rise - 0.7f, {8, 10, 35}, 0.35f},
+      {rise, {235, 125, 70}, 0.7f},
+      {rise + 0.8f, {90, 165, 235}, 1.0f},
+      {set - 0.6f, {90, 165, 235}, 1.0f},
+      {set, {240, 110, 60}, 0.7f},
+      {set + 0.8f, {8, 10, 35}, 0.35f},
       {24, {8, 10, 35}, 0.35f},
   };
   for (size_t i = 1; i < sizeof keys / sizeof keys[0]; ++i) {
@@ -114,8 +160,10 @@ void sceneDraw(const TideData &d, double t, bool lapse, bool stale, uint32_t ms)
   TFT_eSprite &s = *s_scene;
   setRange(d);
   float h = localHour(t);
+  float rise, set;
+  sunTimes(t, rise, set);
   float light;
-  Rgb sky = skyColor(h, light);
+  Rgb sky = skyColor(h, rise, set, light);
 
   // Sky, darker at the top.
   for (int y = 0; y < SCENE_H; ++y) s.drawFastHLine(0, y, 320, rgb(sky, 0.65f + 0.35f * y / SCENE_H));
@@ -126,13 +174,13 @@ void sceneDraw(const TideData &d, double t, bool lapse, bool stale, uint32_t ms)
       if (((ms / 400) + i * 7) % 11) s.drawPixel(x, y, TFT_WHITE);
     }
   }
-  if (h > SUNRISE - 0.3f && h < SUNSET + 0.3f) {
-    float u = (h - (SUNRISE - 0.3f)) / (SUNSET - SUNRISE + 0.6f);
+  if (h > rise - 0.3f && h < set + 0.3f) {
+    float u = (h - (rise - 0.3f)) / (set - rise + 0.6f);
     int x = 20 + u * 260, y = 105 - sinf(u * PI) * 85;
     s.fillCircle(x, y, 10, rgb({255, 220, 90}));
   } else {
-    float hn = h < SUNRISE ? h + 24 : h;
-    float u = (hn - (SUNSET + 0.3f)) / (24 + SUNRISE - SUNSET - 0.6f);
+    float hn = h < rise ? h + 24 : h;
+    float u = (hn - (set + 0.3f)) / (24 + rise - set - 0.6f);
     int x = 20 + u * 260, y = 105 - sinf(u * PI) * 85;
     s.fillCircle(x, y, 8, rgb({230, 230, 210}));
     s.fillCircle(x + 4, y - 2, 7, rgb(sky, 0.7f));  // crescent

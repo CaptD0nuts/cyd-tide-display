@@ -3,6 +3,8 @@
 #include "tide.h"
 
 void sceneBegin(TFT_eSPI &tft);
+// Station position, for real sunrise/sunset. Until it's set the sky uses fixed times.
+void sceneSetLocation(float lat, float lon);
 // One animation frame of the beach (top 150 px). t = the time being shown,
 // lapse = time-lapse replay running, stale = last refresh failed.
 void sceneDraw(const TideData &d, double t, bool lapse, bool stale, uint32_t ms);

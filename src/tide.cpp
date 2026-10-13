@@ -113,16 +113,20 @@ bool tideFetch(const char *station, TideData &d) {
   return true;
 }
 
-bool tideStationName(const char *station, char *out, size_t n) {
+bool tideStationInfo(const char *station, char *name, size_t n, float &lat, float &lon) {
   char url[128];
   snprintf(url, sizeof url, NOAA_META "%s.json", station);
   JsonDocument filter;
   filter["stations"][0]["name"] = true;
+  filter["stations"][0]["lat"] = true;
+  filter["stations"][0]["lng"] = true;
   JsonDocument doc;
   if (!getJson(url, doc, filter)) return false;
-  const char *name = doc["stations"][0]["name"];
-  if (!name) return false;
-  strlcpy(out, name, n);
+  JsonObject s = doc["stations"][0];
+  if (!s["name"].is<const char *>() || !s["lat"].is<float>() || !s["lng"].is<float>()) return false;
+  strlcpy(name, s["name"], n);
+  lat = s["lat"];
+  lon = s["lng"];
   return true;
 }
 

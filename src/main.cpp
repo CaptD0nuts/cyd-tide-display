@@ -28,7 +28,7 @@ static char g_station[12] = DEFAULT_STATION;
 static char g_tz[48] = DEFAULT_TZ;
 static char g_name[40] = "";
 static TideData g_tide;
-static bool g_haveData = false, g_lastOk = false;
+static bool g_haveData = false, g_lastOk = false, g_haveInfo = false;
 static uint32_t g_nextTry = 0;
 static bool g_lapse = false, g_wasTouched = false;
 static uint32_t g_lapseStart = 0;
@@ -74,7 +74,12 @@ static void refresh() {
   g_lastOk = ok;
   if (ok) {
     g_haveData = true;
-    if (!g_name[0] && !tideStationName(g_station, g_name, sizeof g_name)) snprintf(g_name, sizeof g_name, "NOAA %s", g_station);
+    float lat, lon;
+    if (!g_haveInfo && tideStationInfo(g_station, g_name, sizeof g_name, lat, lon)) {
+      g_haveInfo = true;
+      sceneSetLocation(lat, lon);
+    }
+    if (!g_name[0]) snprintf(g_name, sizeof g_name, "NOAA %s", g_station);
   }
   g_nextTry = millis() + (ok ? REFRESH_S * 1000UL : RETRY_MS);
 }

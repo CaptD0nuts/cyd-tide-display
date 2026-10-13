@@ -23,7 +23,8 @@ struct TideData {
 
 // Fetches hourly predictions plus highs/lows. d is only changed on success.
 bool tideFetch(const char *station, TideData &d);
-bool tideStationName(const char *station, char *out, size_t n);
+// Station name and position from NOAA's metadata API.
+bool tideStationInfo(const char *station, char *name, size_t n, float &lat, float &lon);
 bool tideCovers(const TideData &d, double t);
 // Smooth level at time t (Catmull-Rom through the hourly samples).
 float tideLevel(const TideData &d, double t);
