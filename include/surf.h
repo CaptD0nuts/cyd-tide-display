@@ -8,9 +8,13 @@ struct Surf {
   time_t obsTime;  // UTC time of the wave reading, 0 = none yet
   float waterF;    // sea surface temperature
   time_t waterTime; // UTC time of the temperature reading, 0 = none yet
+  float windMph;   // sustained wind
+  float gustMph;   // NAN when the buoy didn't report a gust
+  float windDir;   // degrees true the wind blows FROM, NAN if not reported
+  time_t windTime; // UTC time of the wind reading, 0 = none yet
 };
 
-// Latest wave and water temperature readings from an NDBC buoy's realtime
-// feed. Each part of s is only changed when a reading for it was found;
-// returns true if either was.
+// Latest wave, water temperature and wind readings from an NDBC buoy's
+// realtime feed. Each part of s is only changed when a reading for it was
+// found; returns true if any was.
 bool surfFetch(const char *buoy, Surf &s);

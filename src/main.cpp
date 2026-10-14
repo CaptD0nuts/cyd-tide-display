@@ -32,7 +32,7 @@ static char g_name[40] = "";
 static TideData g_tide;
 static bool g_haveData = false, g_lastOk = false, g_haveInfo = false;
 static uint32_t g_nextTry = 0;
-static Surf g_surf = {NAN, NAN, 0, NAN, 0};
+static Surf g_surf = {NAN, NAN, 0, NAN, 0, NAN, NAN, NAN, 0};
 static bool g_haveSurf = false;
 static uint32_t g_nextSurf = 0;
 static bool g_lapse = false, g_wasTouched = false;
@@ -95,6 +95,8 @@ static void applySurf() {
   sceneSetSurf(fresh ? g_surf.heightFt : NAN, fresh ? g_surf.periodS : NAN);
   bool freshTemp = g_haveSurf && g_surf.waterTime && time(nullptr) - g_surf.waterTime < SURF_STALE_S;
   sceneSetWater(freshTemp ? g_surf.waterF : NAN);
+  bool freshWind = g_haveSurf && g_surf.windTime && time(nullptr) - g_surf.windTime < SURF_STALE_S;
+  sceneSetWind(freshWind ? g_surf.windMph : NAN, g_surf.gustMph, g_surf.windDir);
 }
 
 static void refresh() {

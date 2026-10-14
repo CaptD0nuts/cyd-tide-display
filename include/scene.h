@@ -10,6 +10,9 @@ void sceneSetLocation(float lat, float lon);
 void sceneSetSurf(float heightFt, float periodS);
 // Measured water temperature (F); NAN = no current reading, not shown.
 void sceneSetWater(float waterF);
+// Measured wind (mph, degrees true it blows from); speed NAN = not shown,
+// gust or direction NAN = left out.
+void sceneSetWind(float mph, float gustMph, float dirDeg);
 // One animation frame of the beach (top 150 px). t = the time being shown,
 // lapse = time-lapse replay running, stale = last refresh failed.
 void sceneDraw(const TideData &d, double t, bool lapse, bool stale, uint32_t ms);

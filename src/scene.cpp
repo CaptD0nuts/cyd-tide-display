@@ -53,6 +53,21 @@ void sceneSetWater(float waterF) {
   s_waterF = waterF;
 }
 
+static float s_windMph = NAN, s_gustMph = NAN, s_windDir = NAN;
+
+void sceneSetWind(float mph, float gustMph, float dirDeg) {
+  s_windMph = mph;
+  s_gustMph = gustMph;
+  s_windDir = dirDeg;
+}
+
+// 16-point compass name for a direction in degrees.
+static const char *compass(float deg) {
+  static const char *names[] = {"N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+                                "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"};
+  return names[(int)floorf(fmodf(deg + 11.25f, 360) / 22.5f) % 16];
+}
+
 // Sunrise and sunset (local hours) on the local day containing t, from the
 // standard sunrise equation; within a couple of minutes at mid latitudes.
 // Cached per day since the time-lapse asks every frame.
@@ -399,6 +414,17 @@ void sceneDraw(const TideData &d, double t, bool lapse, bool stale, uint32_t ms)
   else if (isnan(s_surfS)) snprintf(buf, sizeof buf, "WAVES %.1f ft", s_surfFt);
   else snprintf(buf, sizeof buf, "WAVES %.1f ft  %.0f s", s_surfFt, s_surfS);
   shadowText(s, buf, 52, 52, 2, rgb({150, 210, 255}));
+  if (!isnan(s_windMph)) {
+    if (s_windMph < 1) snprintf(buf, sizeof buf, "WIND calm");
+    else {
+      int n = snprintf(buf, sizeof buf, "WIND %s%s%.0f mph", isnan(s_windDir) ? "" : compass(s_windDir),
+                       isnan(s_windDir) ? "" : " ", s_windMph);
+      // Gust only when it adds something.
+      if (!isnan(s_gustMph) && s_gustMph >= s_windMph + 3)
+        snprintf(buf + n, sizeof buf - n, "  gust %.0f", s_gustMph);
+    }
+    shadowText(s, buf, 52, 70, 2, rgb({200, 230, 200}));
+  }
 
   s.setTextDatum(TR_DATUM);
   fmtTime((time_t)t, buf, sizeof buf, false);

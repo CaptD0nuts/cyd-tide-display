@@ -1,7 +1,7 @@
-// Measured waves and water temperature from an NDBC buoy. The realtime2 file
+// Measured waves, water temperature and wind from an NDBC buoy. The realtime2 file
 // holds 45 days of 10-minute rows, newest first, but wave columns are only
-// filled every 30-60 minutes, so read rows until both have turned up and hang
-// up.
+// filled every 30-60 minutes, so read rows until all three have turned up and
+// hang up.
 #include "surf.h"
 #include "config.h"
 #include "tide.h"
@@ -10,6 +10,7 @@
 
 #define NDBC_REALTIME "https://www.ndbc.noaa.gov/data/realtime2/"
 #define MAX_ROWS 30  // about five hours of rows
+#define MS_TO_MPH 2.23694f
 
 bool surfFetch(const char *buoy, Surf &s) {
   char url[96];
@@ -30,8 +31,8 @@ bool surfFetch(const char *buoy, Surf &s) {
   }
 
   Stream &body = http.getStream();
-  bool gotWave = false, gotTemp = false;
-  for (int rows = 0; rows < MAX_ROWS && !(gotWave && gotTemp);) {
+  bool gotWave = false, gotTemp = false, gotWind = false;
+  for (int rows = 0; rows < MAX_ROWS && !(gotWave && gotTemp && gotWind);) {
     String line = body.readStringUntil('\n');
     if (line.length() == 0) break;  // end of data or timeout
     if (line[0] == '#') continue;   // header lines
@@ -55,11 +56,20 @@ bool surfFetch(const char *buoy, Surf &s) {
       s.waterTime = parseUtc(stamp);
       gotTemp = true;
     }
+    if (!gotWind && strcmp(wspd, "MM")) {
+      s.windMph = atof(wspd) * MS_TO_MPH;
+      s.gustMph = strcmp(gst, "MM") ? atof(gst) * MS_TO_MPH : NAN;
+      s.windDir = strcmp(wdir, "MM") ? atof(wdir) : NAN;
+      s.windTime = parseUtc(stamp);
+      gotWind = true;
+    }
   }
   http.end();  // hang up on the rest of the file
   if (gotWave) Serial.printf("ndbc %s: waves %.1f ft, period %.1f s\n", buoy, s.heightFt, s.periodS);
   else Serial.printf("ndbc %s: no wave reading in the last %d rows\n", buoy, MAX_ROWS);
   if (gotTemp) Serial.printf("ndbc %s: water %.1f F\n", buoy, s.waterF);
   else Serial.printf("ndbc %s: no water temperature in the last %d rows\n", buoy, MAX_ROWS);
-  return gotWave || gotTemp;
+  if (gotWind) Serial.printf("ndbc %s: wind %.0f deg %.1f mph, gust %.1f mph\n", buoy, s.windDir, s.windMph, s.gustMph);
+  else Serial.printf("ndbc %s: no wind in the last %d rows\n", buoy, MAX_ROWS);
+  return gotWave || gotTemp || gotWind;
 }
