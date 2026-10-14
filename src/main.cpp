@@ -27,6 +27,7 @@ Preferences prefs;
 
 static char g_station[12] = DEFAULT_STATION;
 static char g_tz[48] = DEFAULT_TZ;
+static char g_buoy[8] = DEFAULT_BUOY;
 static char g_name[40] = "";
 static TideData g_tide;
 static bool g_haveData = false, g_lastOk = false, g_haveInfo = false;
@@ -42,39 +43,48 @@ static void loadPrefs() {
   prefs.begin("tide", true);
   prefs.getString("station", g_station, sizeof g_station);
   prefs.getString("tz", g_tz, sizeof g_tz);
+  prefs.getString("buoy", g_buoy, sizeof g_buoy);
   prefs.end();
   if (!g_station[0]) strlcpy(g_station, DEFAULT_STATION, sizeof g_station);
   if (!g_tz[0]) strlcpy(g_tz, DEFAULT_TZ, sizeof g_tz);
+  if (!g_buoy[0]) strlcpy(g_buoy, DEFAULT_BUOY, sizeof g_buoy);
 }
 
 static void onPortal(WiFiManager *) {
-  sceneMessage("SETUP", "Join WiFi: " SETUP_AP_NAME, "pick your network + tide station");
+  sceneMessage("SETUP", "Join WiFi: " SETUP_AP_NAME, "pick your network, tide station + buoy");
 }
 
 // force = open the setup hotspot even if saved WiFi works (user held the screen).
 static void connect(bool force) {
   WiFiManagerParameter pSta("station", "NOAA tide station id (8730667 = Alabama Point, Orange Beach)", g_station, 10);
+  WiFiManagerParameter pBuoy("buoy", "NDBC buoy id for waves + water temp (42012 = Orange Beach)", g_buoy, 7);
   WiFiManagerParameter pTz("tz", "POSIX time zone (Central: CST6CDT,M3.2.0,M11.1.0)", g_tz, 46);
   WiFiManager wm;
   wm.addParameter(&pSta);
+  wm.addParameter(&pBuoy);
   wm.addParameter(&pTz);
   wm.setAPCallback(onPortal);
   wm.setConfigPortalTimeout(300);
   bool ok = force ? wm.startConfigPortal(SETUP_AP_NAME) : wm.autoConnect(SETUP_AP_NAME);
 
   const char *sta = pSta.getValue(), *tz = pTz.getValue();
-  if ((sta[0] && strcmp(sta, g_station)) || (tz[0] && strcmp(tz, g_tz))) {
+  // NDBC's file names are upper case (PCBF1.txt works, pcbf1.txt is a 404).
+  char buoy[8];
+  strlcpy(buoy, pBuoy.getValue(), sizeof buoy);
+  for (char *c = buoy; *c; ++c) *c = toupper(*c);
+  if ((sta[0] && strcmp(sta, g_station)) || (tz[0] && strcmp(tz, g_tz)) || (buoy[0] && strcmp(buoy, g_buoy))) {
     prefs.begin("tide", false);
     if (sta[0]) prefs.putString("station", sta);
     if (tz[0]) prefs.putString("tz", tz);
+    if (buoy[0]) prefs.putString("buoy", buoy);
     prefs.end();
-    Serial.printf("saved station %s\n", sta);
+    Serial.printf("saved station %s, buoy %s\n", sta, buoy);
   }
   if (!ok || force) ESP.restart();  // timed out, or settings may have changed: start clean
 }
 
 static void refreshSurf() {
-  bool ok = surfFetch(DEFAULT_BUOY, g_surf);
+  bool ok = surfFetch(g_buoy, g_surf);
   g_haveSurf |= ok;
   g_nextSurf = millis() + (ok ? SURF_REFRESH_MS : SURF_RETRY_MS);
 }
@@ -121,7 +131,7 @@ void setup() {
     delay(50);
   }
   connect(held);
-  Serial.printf("wifi up, ip %s, station %s\n", WiFi.localIP().toString().c_str(), g_station);
+  Serial.printf("wifi up, ip %s, station %s, buoy %s\n", WiFi.localIP().toString().c_str(), g_station, g_buoy);
 
   configTzTime(g_tz, "pool.ntp.org", "time.nist.gov");
   sceneMessage("TIDE", "setting the clock...");
