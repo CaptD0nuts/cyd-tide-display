@@ -80,6 +80,38 @@ static void sunTimes(double t, float &rise, float &set) {
   set = cSet;
 }
 
+// Moon's elongation from the sun in degrees (0 new, 90 first quarter, 180
+// full, 270 last quarter), from low-precision lunar theory with the main
+// periodic terms. Phase times land within about an hour of USNO's.
+static double moonElongation(double t) {
+  double d = t / 86400.0 + 2440587.5 - 2451545.0;
+  double ms = fmod(357.5291 + 0.98560028 * d, 360.0) * DEG_TO_RAD;
+  double ls = 280.4665 + 0.98564736 * d + 1.9148 * sin(ms) + 0.02 * sin(2 * ms);
+  double mm = fmod(134.963 + 13.064993 * d, 360.0) * DEG_TO_RAD;
+  double lm0 = 218.316 + 13.176396 * d;
+  double d0 = fmod(lm0 - ls, 360.0) * DEG_TO_RAD;
+  double lm = lm0 + 6.289 * sin(mm) + 1.274 * sin(2 * d0 - mm) + 0.658 * sin(2 * d0) - 0.186 * sin(ms) -
+              0.059 * sin(2 * d0 - 2 * mm) - 0.057 * sin(2 * d0 - ms - mm) + 0.053 * sin(2 * d0 + mm);
+  double e = fmod(lm - ls, 360.0);
+  return e < 0 ? e + 360 : e;
+}
+
+// Moon disk lit to match the phase: waxing lit on the right, waning on the
+// left (as seen from the northern hemisphere).
+static void drawMoon(TFT_eSprite &s, int cx, int cy, int r, double elong, uint16_t dark) {
+  uint16_t lit = s_tft->color565(235, 235, 215);
+  s.fillCircle(cx, cy, r, dark);
+  float c = cosf(elong * DEG_TO_RAD);
+  bool waxing = elong < 180;
+  for (int dy = -r; dy <= r; ++dy) {
+    float hw = sqrtf((float)(r * r - dy * dy));
+    float term = hw * c;  // terminator offset across this row
+    int x0 = waxing ? cx + (int)roundf(term) : cx - (int)roundf(hw);
+    int x1 = waxing ? cx + (int)roundf(hw) : cx - (int)roundf(term);
+    if (x1 > x0) s.drawFastHLine(x0, cy + dy, x1 - x0 + 1, lit);
+  }
+}
+
 static float localHour(double t) {
   time_t tt = (time_t)t;
   struct tm lt;
@@ -162,6 +194,13 @@ void sceneDraw(const TideData &d, double t, bool lapse, bool stale, uint32_t ms)
   float h = localHour(t);
   float rise, set;
   sunTimes(t, rise, set);
+  static bool loggedMoon = false;
+  if (!loggedMoon) {
+    double e = moonElongation(t);
+    Serial.printf("moon: elongation %.1f deg, %.0f%% lit, %s\n", e, (1 - cos(e * DEG_TO_RAD)) / 2 * 100,
+                  e < 180 ? "waxing" : "waning");
+    loggedMoon = true;
+  }
   float light;
   Rgb sky = skyColor(h, rise, set, light);
 
@@ -182,8 +221,7 @@ void sceneDraw(const TideData &d, double t, bool lapse, bool stale, uint32_t ms)
     float hn = h < rise ? h + 24 : h;
     float u = (hn - (set + 0.3f)) / (24 + rise - set - 0.6f);
     int x = 20 + u * 260, y = 105 - sinf(u * PI) * 85;
-    s.fillCircle(x, y, 8, rgb({230, 230, 210}));
-    s.fillCircle(x + 4, y - 2, 7, rgb(sky, 0.7f));  // crescent
+    drawMoon(s, x, y, 9, moonElongation(t), rgb(sky, 1.1f));
   }
 
   // Water: two sine swells riding on the tide level.
