@@ -40,6 +40,13 @@ void sceneSetLocation(float lat, float lon) {
   s_lon = lon;
 }
 
+static float s_surfFt = NAN, s_surfS = NAN;
+
+void sceneSetSurf(float heightFt, float periodS) {
+  s_surfFt = heightFt;
+  s_surfS = periodS;
+}
+
 // Sunrise and sunset (local hours) on the local day containing t, from the
 // standard sunrise equation; within a couple of minutes at mid latitudes.
 // Cached per day since the time-lapse asks every frame.
@@ -319,22 +326,34 @@ void sceneDraw(const TideData &d, double t, bool lapse, bool stale, uint32_t ms)
     drawMoon(s, x, y, 9, m.elong, rgb(skyAt(y), dark ? 1.15f : 1.0f));  // earthshine only after dark
   }
 
-  // Water: two sine swells riding on the tide level.
+  // Water: two swells riding on the tide level, rolling toward the beach.
+  // Height and timing come from the buoy. The screen can't show waves to the
+  // tide's scale (1 ft of tide is ~76 px), so height maps to 1-14 px; the
+  // period is real time, one crest per period.
+  float waveFt = isnan(s_surfFt) ? 1.0f : s_surfFt;
+  float periodS = isnan(s_surfS) || s_surfS < 2 ? 5.0f : s_surfS;
+  float amp = constrain(0.8f + waveFt * 2.6f, 0.8f, 14.0f);
+  float omega = TWO_PI / (periodS * 1000);  // radians per ms
+  float kx = 0.27f / periodS;               // longer period, longer waves
   float k = 0.45f + 0.55f * light;
   uint16_t deep = rgb({10, 70, 110}, k), mid = rgb({25, 135, 165}, k), crest = rgb({170, 230, 235}, k);
   for (int x = 0; x < 320; ++x) {
-    float top = wl + 2.5f * sinf(x * 0.045f + ms * 0.0021f) + 1.5f * sinf(x * 0.11f - ms * 0.0033f);
+    float swell = sinf(x * kx - ms * omega);
+    float top = wl - amp * swell - 0.5f * amp * sinf(x * kx * 2.3f - ms * omega * 1.52f + 1.3f);
     int ty = (int)top;
     s.drawFastVLine(x, ty, SCENE_H - ty, mid);
     if (ty + 18 < SCENE_H) s.drawFastVLine(x, ty + 18, SCENE_H - ty - 18, deep);
-    s.drawPixel(x, ty, crest);
+    // Whitecaps on the crests once the waves are a couple of feet.
+    if (waveFt > 2.0f && swell > 0.85f) s.drawFastVLine(x, ty, 2, TFT_WHITE);
+    else s.drawPixel(x, ty, crest);
   }
 
   // Beach, with swash running up and back at the water's edge.
   uint16_t sand = rgb({225, 200, 140}, k), wet = rgb({170, 145, 95}, k);
   s.fillTriangle(SAND_X0, SCENE_H, 319, SCENE_H, 319, sandY(319), sand);
   float shoreX = SAND_X0 + (SCENE_H - wl) / SAND_SLOPE;
-  float swash = 6 + 5 * sinf(ms * 0.0016f);
+  // One run-up per wave, reaching farther in bigger surf.
+  float swash = 3 + amp * 1.3f + amp * 1.2f * sinf(ms * omega);
   for (int j = 1; j <= 3; ++j)
     s.drawLine(shoreX - 4, wl + j, shoreX + 14, wl - 14 * SAND_SLOPE + j, wet);
   for (int j = 0; j < 2; ++j)
@@ -370,6 +389,10 @@ void sceneDraw(const TideData &d, double t, bool lapse, bool stale, uint32_t ms)
   int ax = 52 + s.textWidth(buf, 2) + 8, ay = 42;
   if (rate > 0.02f) s.fillTriangle(ax, ay + 5, ax + 10, ay + 5, ax + 5, ay - 5, rgb({120, 255, 160}));
   else if (rate < -0.02f) s.fillTriangle(ax, ay - 5, ax + 10, ay - 5, ax + 5, ay + 5, rgb({255, 190, 90}));
+  if (isnan(s_surfFt)) snprintf(buf, sizeof buf, "WAVES --");
+  else if (isnan(s_surfS)) snprintf(buf, sizeof buf, "WAVES %.1f ft", s_surfFt);
+  else snprintf(buf, sizeof buf, "WAVES %.1f ft  %.0f s", s_surfFt, s_surfS);
+  shadowText(s, buf, 52, 52, 2, rgb({150, 210, 255}));
 
   s.setTextDatum(TR_DATUM);
   fmtTime((time_t)t, buf, sizeof buf, false);

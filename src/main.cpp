@@ -11,6 +11,7 @@
 #include "config.h"
 #include "tide.h"
 #include "scene.h"
+#include "surf.h"
 
 // Touch controller on its own SPI pins.
 #define TOUCH_CS   33
@@ -30,6 +31,9 @@ static char g_name[40] = "";
 static TideData g_tide;
 static bool g_haveData = false, g_lastOk = false, g_haveInfo = false;
 static uint32_t g_nextTry = 0;
+static Surf g_surf;
+static bool g_haveSurf = false;
+static uint32_t g_nextSurf = 0;
 static bool g_lapse = false, g_wasTouched = false;
 static uint32_t g_lapseStart = 0;
 static uint32_t g_lastChart = 0;  // 0 = chart needs a repaint
@@ -67,6 +71,18 @@ static void connect(bool force) {
     Serial.printf("saved station %s\n", sta);
   }
   if (!ok || force) ESP.restart();  // timed out, or settings may have changed: start clean
+}
+
+static void refreshSurf() {
+  bool ok = surfFetch(DEFAULT_BUOY, g_surf);
+  g_haveSurf |= ok;
+  g_nextSurf = millis() + (ok ? SURF_REFRESH_MS : SURF_RETRY_MS);
+}
+
+// Hand the scene the reading if it's recent, else NAN (default swell).
+static void applySurf() {
+  bool fresh = g_haveSurf && time(nullptr) - g_surf.obsTime < SURF_STALE_S;
+  sceneSetSurf(fresh ? g_surf.heightFt : NAN, fresh ? g_surf.periodS : NAN);
 }
 
 static void refresh() {
@@ -123,6 +139,8 @@ void setup() {
 void loop() {
   uint32_t ms = millis();
   if ((int32_t)(ms - g_nextTry) >= 0 && !g_lapse) refresh();
+  if ((int32_t)(ms - g_nextSurf) >= 0 && !g_lapse) refreshSurf();
+  applySurf();
 
   bool touched = touch.touched();
   if (touched && !g_wasTouched) {

@@ -10,8 +10,8 @@
 #define NOAA_DATA "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter"
 #define NOAA_META "https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations/"
 
-// "YYYY-MM-DD HH:MM" in UTC to epoch (newlib has no timegm).
-static time_t parseUtc(const char *s) {
+// newlib has no timegm.
+time_t parseUtc(const char *s) {
   int y, mo, d, h, mi;
   if (!s || sscanf(s, "%d-%d-%d %d:%d", &y, &mo, &d, &h, &mi) != 5) return 0;
   y -= mo <= 2;

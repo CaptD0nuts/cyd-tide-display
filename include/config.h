@@ -15,6 +15,12 @@
 #define RETRY_MS       120000      // after a failed fetch
 #define FRAME_MS       33
 
+// Measured waves from NDBC buoy 42012 ("Orange Beach"), about 14 nm offshore.
+#define DEFAULT_BUOY   "42012"
+#define SURF_REFRESH_MS (30 * 60 * 1000UL)  // the buoy reports waves every 30-60 min
+#define SURF_RETRY_MS  (5 * 60 * 1000UL)
+#define SURF_STALE_S   (3 * 3600)           // older reading than this = show default waves
+
 // Tap the screen: replay the next LAPSE_HOURS in LAPSE_MS.
 #define LAPSE_HOURS 24
 #define LAPSE_MS    24000
