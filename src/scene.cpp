@@ -138,10 +138,12 @@ static float localHour(double t) {
   return lt.tm_hour + lt.tm_min / 60.0f + lt.tm_sec / 3600.0f;
 }
 
-// Sun's altitude in degrees at time t (same solar theory as sunTimes; within
-// about 0.3 deg of USNO). Without a station position, a rough stand-in built
-// from the fallback sunrise/sunset hours.
-static float sunAltitude(double t, float h, float rise, float set) {
+// Sun's altitude and azimuth (degrees east of north) at time t, same solar
+// theory as sunTimes; matches USNO to about 0.01 deg here. Without a station
+// position, a rough altitude built from the fallback sunrise/sunset hours and
+// az = NAN.
+static float sunPos(double t, float h, float rise, float set, float &az) {
+  az = NAN;
   if (isnan(s_lat)) {
     if (h > rise && h < set) return 50 * sinf(PI * (h - rise) / (set - rise));
     float hn = h < rise ? h + 24 : h;
@@ -156,7 +158,15 @@ static float sunAltitude(double t, float h, float rise, float set) {
   double dec = asin(sin(eps) * sin(lam));
   double ha = (fmod(280.46061837 + 360.98564736629 * d, 360.0) + s_lon) * DEG_TO_RAD - ra;
   double phi = s_lat * DEG_TO_RAD;
+  az = fmod(atan2(sin(ha), cos(ha) * sin(phi) - tan(dec) * cos(phi)) * RAD_TO_DEG + 540.0, 360.0);
   return asin(sin(phi) * sin(dec) + cos(phi) * cos(dec) * cos(ha)) * RAD_TO_DEG;
+}
+
+// Screen spot for a body at (alt, az): azimuth across (east left, west right),
+// altitude up from the horizon line. Shared by the sun and the moon.
+static void skyXY(float alt, float az, int &x, int &y) {
+  x = 10 + (az - 60) / 240 * 300;
+  y = max(12, (int)(105 - alt * 1.15f));
 }
 
 // Sky colors (zenith and horizon) for a sun altitude, through the real
@@ -247,10 +257,13 @@ void sceneDraw(const TideData &d, double t, bool lapse, bool stale, uint32_t ms)
                   (1 - cos(m.elong * DEG_TO_RAD)) / 2 * 100, m.elong < 180 ? "waxing" : "waning", m.alt, m.az);
     loggedMoon = true;
   }
-  float sunAlt = sunAltitude(t, h, rise, set);
+  float level = tideLevel(d, t);
+  float wl = levelY(level);
+  float sunAz;
+  float sunAlt = sunPos(t, h, rise, set, sunAz);
   static bool loggedSun = false;
   if (!loggedSun) {
-    Serial.printf("sun: alt %.2f deg\n", sunAlt);
+    Serial.printf("sun: alt %.2f az %.1f deg\n", sunAlt, sunAz);
     loggedSun = true;
   }
   float light;
@@ -270,11 +283,19 @@ void sceneDraw(const TideData &d, double t, bool lapse, bool stale, uint32_t ms)
       if (((ms / 400) + i * 7) % 11) s.drawPixel(x, y, TFT_WHITE);
     }
   }
-  if (h > rise - 0.3f && h < set + 0.3f) {
-    float u = (h - (rise - 0.3f)) / (set - rise + 0.6f);
-    int x = 20 + u * 260, y = 105 - sinf(u * PI) * 85;
-    // Redder near the horizon.
-    s.fillCircle(x, y, 10, rgb(mix({255, 120, 60}, {255, 220, 90}, constrain(sunAlt / 10, 0.0f, 1.0f))));
+  // Sun wherever it really is; kept a moment past -0.833 deg so the disk sinks
+  // out of view instead of blinking off. Redder near the horizon.
+  uint16_t sunColor = rgb(mix({255, 120, 60}, {255, 220, 90}, constrain(sunAlt / 10, 0.0f, 1.0f)));
+  if (isnan(sunAz)) {
+    // No station position yet: ride a fixed arc between the fallback times.
+    if (h > rise - 0.3f && h < set + 0.3f) {
+      float u = (h - (rise - 0.3f)) / (set - rise + 0.6f);
+      s.fillCircle(20 + u * 260, 105 - sinf(u * PI) * 85, 10, sunColor);
+    }
+  } else if (sunAlt > -1.5f) {
+    int x, y;
+    skyXY(sunAlt, sunAz, x, y);
+    s.fillCircle(x, y, 10, sunColor);
   }
   // Moon wherever it really is, day or night: east on the left, west on the
   // right, like the sun. Rises/sets at +0.125 deg geocentric (USNO's convention).
@@ -288,13 +309,12 @@ void sceneDraw(const TideData &d, double t, bool lapse, bool stale, uint32_t ms)
       drawMoon(s, 20 + u * 260, y, 9, m.elong, rgb(skyAt(y), 1.15f));
     }
   } else if (m.alt > 0.125) {
-    int x = 10 + (m.az - 60) / 240 * 300, y = max(12, (int)(105 - m.alt * 1.15));
+    int x, y;
+    skyXY(m.alt, m.az, x, y);
     drawMoon(s, x, y, 9, m.elong, rgb(skyAt(y), dark ? 1.15f : 1.0f));  // earthshine only after dark
   }
 
   // Water: two sine swells riding on the tide level.
-  float level = tideLevel(d, t);
-  float wl = levelY(level);
   float k = 0.45f + 0.55f * light;
   uint16_t deep = rgb({10, 70, 110}, k), mid = rgb({25, 135, 165}, k), crest = rgb({170, 230, 235}, k);
   for (int x = 0; x < 320; ++x) {
