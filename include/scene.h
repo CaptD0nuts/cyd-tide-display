@@ -8,6 +8,8 @@ void sceneSetLocation(float lat, float lon);
 // Measured wave height (ft) and period (s) driving the swell; NAN = no
 // current reading, which draws a default 1 ft / 5 s swell and says so.
 void sceneSetSurf(float heightFt, float periodS);
+// Measured water temperature (F); NAN = no current reading, not shown.
+void sceneSetWater(float waterF);
 // One animation frame of the beach (top 150 px). t = the time being shown,
 // lapse = time-lapse replay running, stale = last refresh failed.
 void sceneDraw(const TideData &d, double t, bool lapse, bool stale, uint32_t ms);

@@ -1,6 +1,7 @@
-// Measured waves from an NDBC buoy. The realtime2 file holds 45 days of
-// 10-minute rows, newest first, but wave columns are only filled every 30-60
-// minutes, so read rows until one has a wave height and hang up.
+// Measured waves and water temperature from an NDBC buoy. The realtime2 file
+// holds 45 days of 10-minute rows, newest first, but wave columns are only
+// filled every 30-60 minutes, so read rows until both have turned up and hang
+// up.
 #include "surf.h"
 #include "config.h"
 #include "tide.h"
@@ -29,27 +30,36 @@ bool surfFetch(const char *buoy, Surf &s) {
   }
 
   Stream &body = http.getStream();
-  bool found = false;
-  for (int rows = 0; rows < MAX_ROWS && !found;) {
+  bool gotWave = false, gotTemp = false;
+  for (int rows = 0; rows < MAX_ROWS && !(gotWave && gotTemp);) {
     String line = body.readStringUntil('\n');
     if (line.length() == 0) break;  // end of data or timeout
     if (line[0] == '#') continue;   // header lines
     ++rows;
-    // #YY MM DD hh mm WDIR WSPD GST WVHT DPD APD ...
+    // #YY MM DD hh mm WDIR WSPD GST WVHT DPD APD MWD PRES ATMP WTMP ...
     int y, mo, d, h, mi;
-    char wdir[8], wspd[8], gst[8], wvht[8], dpd[8], apd[8];
-    if (sscanf(line.c_str(), "%d %d %d %d %d %7s %7s %7s %7s %7s %7s", &y, &mo, &d, &h, &mi, wdir, wspd, gst, wvht,
-               dpd, apd) != 11)
+    char wdir[8], wspd[8], gst[8], wvht[8], dpd[8], apd[8], mwd[8], pres[8], atmp[8], wtmp[8];
+    if (sscanf(line.c_str(), "%d %d %d %d %d %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s", &y, &mo, &d, &h, &mi, wdir,
+               wspd, gst, wvht, dpd, apd, mwd, pres, atmp, wtmp) != 15)
       continue;
-    if (!strcmp(wvht, "MM")) continue;
-    float period = strcmp(dpd, "MM") ? atof(dpd) : strcmp(apd, "MM") ? atof(apd) : NAN;
     char stamp[20];
     snprintf(stamp, sizeof stamp, "%04d-%02d-%02d %02d:%02d", y, mo, d, h, mi);
-    s = {atof(wvht) * 3.28084f, period, parseUtc(stamp)};
-    found = true;
+    if (!gotWave && strcmp(wvht, "MM")) {
+      s.heightFt = atof(wvht) * 3.28084f;
+      s.periodS = strcmp(dpd, "MM") ? atof(dpd) : strcmp(apd, "MM") ? atof(apd) : NAN;
+      s.obsTime = parseUtc(stamp);
+      gotWave = true;
+    }
+    if (!gotTemp && strcmp(wtmp, "MM")) {
+      s.waterF = atof(wtmp) * 9 / 5 + 32;
+      s.waterTime = parseUtc(stamp);
+      gotTemp = true;
+    }
   }
   http.end();  // hang up on the rest of the file
-  if (found) Serial.printf("ndbc %s: waves %.1f ft, period %.1f s\n", buoy, s.heightFt, s.periodS);
+  if (gotWave) Serial.printf("ndbc %s: waves %.1f ft, period %.1f s\n", buoy, s.heightFt, s.periodS);
   else Serial.printf("ndbc %s: no wave reading in the last %d rows\n", buoy, MAX_ROWS);
-  return found;
+  if (gotTemp) Serial.printf("ndbc %s: water %.1f F\n", buoy, s.waterF);
+  else Serial.printf("ndbc %s: no water temperature in the last %d rows\n", buoy, MAX_ROWS);
+  return gotWave || gotTemp;
 }
