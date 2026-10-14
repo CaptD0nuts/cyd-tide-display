@@ -138,27 +138,54 @@ static float localHour(double t) {
   return lt.tm_hour + lt.tm_min / 60.0f + lt.tm_sec / 3600.0f;
 }
 
-// Sky color through the day plus a 0..1 daylight factor for dimming the scene.
-static Rgb skyColor(float h, float rise, float set, float &light) {
-  const struct { float h; Rgb c; float light; } keys[] = {
-      {0, {8, 10, 35}, 0.35f},
-      {rise - 0.7f, {8, 10, 35}, 0.35f},
-      {rise, {235, 125, 70}, 0.7f},
-      {rise + 0.8f, {90, 165, 235}, 1.0f},
-      {set - 0.6f, {90, 165, 235}, 1.0f},
-      {set, {240, 110, 60}, 0.7f},
-      {set + 0.8f, {8, 10, 35}, 0.35f},
-      {24, {8, 10, 35}, 0.35f},
-  };
-  for (size_t i = 1; i < sizeof keys / sizeof keys[0]; ++i) {
-    if (h <= keys[i].h) {
-      float u = (h - keys[i - 1].h) / (keys[i].h - keys[i - 1].h);
-      light = keys[i - 1].light + (keys[i].light - keys[i - 1].light) * u;
-      return mix(keys[i - 1].c, keys[i].c, u);
-    }
+// Sun's altitude in degrees at time t (same solar theory as sunTimes; within
+// about 0.3 deg of USNO). Without a station position, a rough stand-in built
+// from the fallback sunrise/sunset hours.
+static float sunAltitude(double t, float h, float rise, float set) {
+  if (isnan(s_lat)) {
+    if (h > rise && h < set) return 50 * sinf(PI * (h - rise) / (set - rise));
+    float hn = h < rise ? h + 24 : h;
+    return -40 * sinf(PI * (hn - set) / (24 - (set - rise)));
   }
-  light = 0.35f;
-  return keys[0].c;
+  double d = t / 86400.0 + 2440587.5 - 2451545.0;
+  double m = fmod(357.5291 + 0.98560028 * d, 360.0) * DEG_TO_RAD;
+  double c = 1.9148 * sin(m) + 0.02 * sin(2 * m) + 0.0003 * sin(3 * m);
+  double lam = fmod(280.4665 + 0.98564736 * d + c, 360.0) * DEG_TO_RAD;
+  double eps = 23.4397 * DEG_TO_RAD;
+  double ra = atan2(cos(eps) * sin(lam), cos(lam));
+  double dec = asin(sin(eps) * sin(lam));
+  double ha = (fmod(280.46061837 + 360.98564736629 * d, 360.0) + s_lon) * DEG_TO_RAD - ra;
+  double phi = s_lat * DEG_TO_RAD;
+  return asin(sin(phi) * sin(dec) + cos(phi) * cos(dec) * cos(ha)) * RAD_TO_DEG;
+}
+
+// Sky colors (zenith and horizon) for a sun altitude, through the real
+// twilight stages: astronomical (-18), nautical (-12), civil (-6), sunrise/set
+// (about -0.8), golden hour. Also a 0..1 daylight factor for dimming the scene.
+static void skyColor(float alt, Rgb &top, Rgb &bottom, float &light) {
+  static const struct { float alt; Rgb top, bottom; float light; } keys[] = {
+      {-18, {5, 7, 25}, {10, 12, 40}, 0.35f},
+      {-12, {8, 12, 42}, {28, 32, 85}, 0.38f},
+      {-6, {22, 32, 85}, {125, 80, 125}, 0.48f},
+      {-2, {40, 62, 135}, {240, 120, 70}, 0.62f},
+      {2, {70, 120, 200}, {250, 170, 90}, 0.78f},
+      {8, {70, 140, 220}, {160, 195, 230}, 0.92f},
+      {15, {60, 130, 220}, {120, 180, 240}, 1.0f},
+  };
+  const int n = sizeof keys / sizeof keys[0];
+  if (alt <= keys[0].alt || alt >= keys[n - 1].alt) {
+    int i = alt <= keys[0].alt ? 0 : n - 1;
+    top = keys[i].top;
+    bottom = keys[i].bottom;
+    light = keys[i].light;
+    return;
+  }
+  int i = 1;
+  while (alt > keys[i].alt) ++i;
+  float u = (alt - keys[i - 1].alt) / (keys[i].alt - keys[i - 1].alt);
+  top = mix(keys[i - 1].top, keys[i].top, u);
+  bottom = mix(keys[i - 1].bottom, keys[i].bottom, u);
+  light = keys[i - 1].light + (keys[i].light - keys[i - 1].light) * u;
 }
 
 static float s_lo, s_hi;  // level range the scene and chart are scaled to
@@ -220,14 +247,25 @@ void sceneDraw(const TideData &d, double t, bool lapse, bool stale, uint32_t ms)
                   (1 - cos(m.elong * DEG_TO_RAD)) / 2 * 100, m.elong < 180 ? "waxing" : "waning", m.alt, m.az);
     loggedMoon = true;
   }
+  float sunAlt = sunAltitude(t, h, rise, set);
+  static bool loggedSun = false;
+  if (!loggedSun) {
+    Serial.printf("sun: alt %.2f deg\n", sunAlt);
+    loggedSun = true;
+  }
   float light;
-  Rgb sky = skyColor(h, rise, set, light);
+  Rgb skyTop, skyBottom;
+  skyColor(sunAlt, skyTop, skyBottom, light);
+  auto skyAt = [&](int y) { return mix(skyTop, skyBottom, (float)y / SCENE_H); };
+  bool dark = sunAlt < -8;
 
-  // Sky, darker at the top.
-  for (int y = 0; y < SCENE_H; ++y) s.drawFastHLine(0, y, 320, rgb(sky, 0.65f + 0.35f * y / SCENE_H));
+  // Sky, zenith color at the top fading to the horizon color.
+  for (int y = 0; y < SCENE_H; ++y) s.drawFastHLine(0, y, 320, rgb(skyAt(y)));
 
-  if (light < 0.6f) {  // stars, twinkling
-    for (int i = 0; i < 28; ++i) {
+  // Stars, twinkling, coming out one by one as the sky darkens past -8 deg.
+  int stars = dark ? (int)(28 * constrain((-8 - sunAlt) / 8, 0.0f, 1.0f)) : 0;
+  if (stars) {
+    for (int i = 0; i < stars; ++i) {
       int x = (i * 97 + 13) % 320, y = (i * 53 + 7) % 70;
       if (((ms / 400) + i * 7) % 11) s.drawPixel(x, y, TFT_WHITE);
     }
@@ -235,21 +273,23 @@ void sceneDraw(const TideData &d, double t, bool lapse, bool stale, uint32_t ms)
   if (h > rise - 0.3f && h < set + 0.3f) {
     float u = (h - (rise - 0.3f)) / (set - rise + 0.6f);
     int x = 20 + u * 260, y = 105 - sinf(u * PI) * 85;
-    s.fillCircle(x, y, 10, rgb({255, 220, 90}));
+    // Redder near the horizon.
+    s.fillCircle(x, y, 10, rgb(mix({255, 120, 60}, {255, 220, 90}, constrain(sunAlt / 10, 0.0f, 1.0f))));
   }
   // Moon wherever it really is, day or night: east on the left, west on the
   // right, like the sun. Rises/sets at +0.125 deg geocentric (USNO's convention).
   MoonPos m = moonPos(t);
   if (isnan(m.alt)) {
     // No station position yet: fall back to riding the night sky.
-    if (light < 0.6f) {
+    if (dark) {
       float hn = h < rise ? h + 24 : h;
       float u = (hn - (set + 0.3f)) / (24 + rise - set - 0.6f);
-      drawMoon(s, 20 + u * 260, 105 - sinf(u * PI) * 85, 9, m.elong, rgb(sky, 1.1f));
+      int y = 105 - sinf(u * PI) * 85;
+      drawMoon(s, 20 + u * 260, y, 9, m.elong, rgb(skyAt(y), 1.15f));
     }
   } else if (m.alt > 0.125) {
     int x = 10 + (m.az - 60) / 240 * 300, y = max(12, (int)(105 - m.alt * 1.15));
-    drawMoon(s, x, y, 9, m.elong, light < 0.6f ? rgb(sky, 1.1f) : rgb(sky, 0.65f + 0.35f * y / SCENE_H));
+    drawMoon(s, x, y, 9, m.elong, rgb(skyAt(y), dark ? 1.15f : 1.0f));  // earthshine only after dark
   }
 
   // Water: two sine swells riding on the tide level.
