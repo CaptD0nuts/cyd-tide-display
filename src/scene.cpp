@@ -80,10 +80,16 @@ static void sunTimes(double t, float &rise, float &set) {
   set = cSet;
 }
 
-// Moon's elongation from the sun in degrees (0 new, 90 first quarter, 180
-// full, 270 last quarter), from low-precision lunar theory with the main
-// periodic terms. Phase times land within about an hour of USNO's.
-static double moonElongation(double t) {
+struct MoonPos {
+  double elong;  // degrees from the sun: 0 new, 90 first quarter, 180 full, 270 last quarter
+  double alt;    // geocentric altitude, degrees (NAN until the station position is known)
+  double az;     // azimuth, degrees east of north
+};
+
+// Moon from low-precision lunar theory with the main periodic terms. Phase
+// times land within about an hour of USNO's, rise/set within a few minutes.
+static MoonPos moonPos(double t) {
+  MoonPos r;
   double d = t / 86400.0 + 2440587.5 - 2451545.0;
   double ms = fmod(357.5291 + 0.98560028 * d, 360.0) * DEG_TO_RAD;
   double ls = 280.4665 + 0.98564736 * d + 1.9148 * sin(ms) + 0.02 * sin(2 * ms);
@@ -93,7 +99,20 @@ static double moonElongation(double t) {
   double lm = lm0 + 6.289 * sin(mm) + 1.274 * sin(2 * d0 - mm) + 0.658 * sin(2 * d0) - 0.186 * sin(ms) -
               0.059 * sin(2 * d0 - 2 * mm) - 0.057 * sin(2 * d0 - ms - mm) + 0.053 * sin(2 * d0 + mm);
   double e = fmod(lm - ls, 360.0);
-  return e < 0 ? e + 360 : e;
+  r.elong = e < 0 ? e + 360 : e;
+  r.alt = r.az = NAN;
+  if (isnan(s_lat)) return r;
+
+  double f = fmod(93.272 + 13.229350 * d, 360.0) * DEG_TO_RAD;
+  double lam = lm * DEG_TO_RAD, beta = 5.128 * sin(f) * DEG_TO_RAD, eps = 23.4397 * DEG_TO_RAD;
+  double ra = atan2(sin(lam) * cos(eps) - tan(beta) * sin(eps), cos(lam));
+  double dec = asin(sin(beta) * cos(eps) + cos(beta) * sin(eps) * sin(lam));
+  double gmst = fmod(280.46061837 + 360.98564736629 * d, 360.0);
+  double ha = (gmst + s_lon) * DEG_TO_RAD - ra;
+  double phi = s_lat * DEG_TO_RAD;
+  r.alt = asin(sin(phi) * sin(dec) + cos(phi) * cos(dec) * cos(ha)) * RAD_TO_DEG;
+  r.az = fmod(atan2(sin(ha), cos(ha) * sin(phi) - tan(dec) * cos(phi)) * RAD_TO_DEG + 540.0, 360.0);
+  return r;
 }
 
 // Moon disk lit to match the phase: waxing lit on the right, waning on the
@@ -196,9 +215,9 @@ void sceneDraw(const TideData &d, double t, bool lapse, bool stale, uint32_t ms)
   sunTimes(t, rise, set);
   static bool loggedMoon = false;
   if (!loggedMoon) {
-    double e = moonElongation(t);
-    Serial.printf("moon: elongation %.1f deg, %.0f%% lit, %s\n", e, (1 - cos(e * DEG_TO_RAD)) / 2 * 100,
-                  e < 180 ? "waxing" : "waning");
+    MoonPos m = moonPos(t);
+    Serial.printf("moon: elongation %.1f deg, %.0f%% lit, %s, alt %.1f az %.0f\n", m.elong,
+                  (1 - cos(m.elong * DEG_TO_RAD)) / 2 * 100, m.elong < 180 ? "waxing" : "waning", m.alt, m.az);
     loggedMoon = true;
   }
   float light;
@@ -217,11 +236,20 @@ void sceneDraw(const TideData &d, double t, bool lapse, bool stale, uint32_t ms)
     float u = (h - (rise - 0.3f)) / (set - rise + 0.6f);
     int x = 20 + u * 260, y = 105 - sinf(u * PI) * 85;
     s.fillCircle(x, y, 10, rgb({255, 220, 90}));
-  } else {
-    float hn = h < rise ? h + 24 : h;
-    float u = (hn - (set + 0.3f)) / (24 + rise - set - 0.6f);
-    int x = 20 + u * 260, y = 105 - sinf(u * PI) * 85;
-    drawMoon(s, x, y, 9, moonElongation(t), rgb(sky, 1.1f));
+  }
+  // Moon wherever it really is, day or night: east on the left, west on the
+  // right, like the sun. Rises/sets at +0.125 deg geocentric (USNO's convention).
+  MoonPos m = moonPos(t);
+  if (isnan(m.alt)) {
+    // No station position yet: fall back to riding the night sky.
+    if (light < 0.6f) {
+      float hn = h < rise ? h + 24 : h;
+      float u = (hn - (set + 0.3f)) / (24 + rise - set - 0.6f);
+      drawMoon(s, 20 + u * 260, 105 - sinf(u * PI) * 85, 9, m.elong, rgb(sky, 1.1f));
+    }
+  } else if (m.alt > 0.125) {
+    int x = 10 + (m.az - 60) / 240 * 300, y = max(12, (int)(105 - m.alt * 1.15));
+    drawMoon(s, x, y, 9, m.elong, light < 0.6f ? rgb(sky, 1.1f) : rgb(sky, 0.65f + 0.35f * y / SCENE_H));
   }
 
   // Water: two sine swells riding on the tide level.
