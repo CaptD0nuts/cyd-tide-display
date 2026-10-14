@@ -406,18 +406,19 @@ void sceneDraw(const TideData &d, double t, bool lapse, bool stale, uint32_t ms)
   if (lapse) shadowText(s, "TIME-LAPSE", 314, 24, 2, TFT_YELLOW);
   else if (stale) shadowText(s, "NO SIGNAL", 314, 24, 2, TFT_RED);
 
-  // Water temperature, right-aligned under the clock. The fonts have no
+  // Water temperature, right-aligned two lines under the clock. The fonts have no
   // degree sign, so draw a small ring.
   if (!isnan(s_waterF)) {
     char num[16];
     snprintf(num, sizeof num, "WATER %.0f", s_waterF);
     uint16_t c = rgb({255, 200, 140});
     int wNum = s.textWidth(num, 2), wF = s.textWidth("F", 2), x0 = 314 - wF - 6 - wNum;
+    const int ty = 60;  // a line below the TIME-LAPSE / NO SIGNAL slot, clear of the trend text
     s.setTextDatum(TL_DATUM);
-    shadowText(s, num, x0, 42, 2, c);
-    s.drawCircle(x0 + wNum + 3, 45, 2, TFT_BLACK);
-    s.drawCircle(x0 + wNum + 2, 44, 2, c);
-    shadowText(s, "F", 314 - wF, 42, 2, c);
+    shadowText(s, num, x0, ty, 2, c);
+    s.drawCircle(x0 + wNum + 3, ty + 3, 2, TFT_BLACK);
+    s.drawCircle(x0 + wNum + 2, ty + 2, 2, c);
+    shadowText(s, "F", 314 - wF, ty, 2, c);
   }
 
   s.pushSprite(0, 0);
