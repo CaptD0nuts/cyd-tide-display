@@ -162,11 +162,16 @@ static float sunPos(double t, float h, float rise, float set, float &az) {
   return asin(sin(phi) * sin(dec) + cos(phi) * cos(dec) * cos(ha)) * RAD_TO_DEG;
 }
 
+static float sandY(float x);
+
 // Screen spot for a body at (alt, az): azimuth across (east left, west right),
-// altitude up from the horizon line. Shared by the sun and the moon.
-static void skyXY(float alt, float az, int &x, int &y) {
+// altitude measured up from what's really in the way at that x, the water
+// line wl or the sand, so it touches the beach at real rise/set. 60 deg and
+// up sits at the top. Shared by the sun and the moon.
+static void skyXY(float alt, float az, float wl, int &x, int &y) {
   x = 10 + (az - 60) / 240 * 300;
-  y = max(12, (int)(105 - alt * 1.15f));
+  float horizon = fminf(wl, sandY(x));
+  y = max(12, (int)(horizon - alt * (horizon - 12) / 60));
 }
 
 // Sky colors (zenith and horizon) for a sun altitude, through the real
@@ -294,7 +299,7 @@ void sceneDraw(const TideData &d, double t, bool lapse, bool stale, uint32_t ms)
     }
   } else if (sunAlt > -1.5f) {
     int x, y;
-    skyXY(sunAlt, sunAz, x, y);
+    skyXY(sunAlt, sunAz, wl, x, y);
     s.fillCircle(x, y, 10, sunColor);
   }
   // Moon wherever it really is, day or night: east on the left, west on the
@@ -310,7 +315,7 @@ void sceneDraw(const TideData &d, double t, bool lapse, bool stale, uint32_t ms)
     }
   } else if (m.alt > 0.125) {
     int x, y;
-    skyXY(m.alt, m.az, x, y);
+    skyXY(m.alt, m.az, wl, x, y);
     drawMoon(s, x, y, 9, m.elong, rgb(skyAt(y), dark ? 1.15f : 1.0f));  // earthshine only after dark
   }
 
