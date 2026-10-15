@@ -45,3 +45,7 @@ Two other projects run on the same kind of board:
 
 - [Sea Tracker CYD](https://github.com/CaptD0nuts/cyd-sea-tracker) shows sharks, sea turtles and other animals tagged by [OCEARCH](https://www.ocearch.org/tracker/) on a sonar scope, with details for the nearest one.
 - [Flight Tracker CYD](https://github.com/CaptD0nuts/Flight-Tracker-CYD) shows nearby aircraft from the [adsb.lol](https://adsb.lol) feed on a radar scope, with the flight, route, airline, altitude and speed of the nearest one.
+
+## License
+
+MIT, see [LICENSE](LICENSE). Libraries pulled in by PlatformIO (TFT_eSPI, ArduinoJson, WiFiManager, XPT2046_Touchscreen) keep their own licenses. Tide predictions and buoy readings come from NOAA.
