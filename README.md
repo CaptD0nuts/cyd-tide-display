@@ -41,4 +41,7 @@ To reopen the setup page later, hold a finger on the screen while plugging the b
 
 ## Related
 
-[Sea Tracker CYD](https://github.com/CaptD0nuts/cyd-sea-tracker) runs on the same kind of board. It shows sharks, sea turtles and other animals tagged by [OCEARCH](https://www.ocearch.org/tracker/) on a sonar scope, with details for the nearest one.
+Two other projects run on the same kind of board:
+
+- [Sea Tracker CYD](https://github.com/CaptD0nuts/cyd-sea-tracker) shows sharks, sea turtles and other animals tagged by [OCEARCH](https://www.ocearch.org/tracker/) on a sonar scope, with details for the nearest one.
+- [Flight Tracker CYD](https://github.com/CaptD0nuts/Flight-Tracker-CYD) shows nearby aircraft from the [adsb.lol](https://adsb.lol) feed on a radar scope, with the flight, route, airline, altitude and speed of the nearest one.
